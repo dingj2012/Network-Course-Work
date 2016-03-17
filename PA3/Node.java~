@@ -1,0 +1,257 @@
+import java.io.*;
+//import java.util.Array;
+import java.util.ArrayList;
+
+
+/*
+ * This is the class that students need to implement. The code skeleton is provided.
+ * Students need to implement rtinit(), rtupdate() and linkhandler().
+ * printdt() is provided to pretty print a table of the current costs for reaching
+ * other nodes in the network.
+ */ 
+public class Node { 
+    
+    public static final int INFINITY = 9999;
+    
+    int[] lkcost;     /*The link cost between node 0 and other nodes*/
+    int[][] costs;    /*Define distance table*/
+    int nodename;     /*Name of this node*/
+    int[] routes;     /*Define routing table*/
+    int node_num = 4; /*declare the distance table as a 4-by-4 array*/
+    
+    /* Class constructor */
+    public Node() {
+        lkcost = new int[node_num];
+        costs = new int[node_num][node_num];
+        routes = new int[node_num];
+    }
+    
+    /* students to write the following two routines, and maybe some others */
+    void rtinit(int nodename, int[] initial_lkcost) {
+        System.out.println("Initializing Node "+ nodename);
+        System.out.println("==================================");
+        
+        this.nodename = nodename;
+        lkcost = initial_lkcost;
+        
+        // Initialize distance table
+        for (int i = 0; i < node_num; i++) {
+            for (int j = 0; j < node_num; j++) {
+                if (i == j) {
+                    costs[i][j] = initial_lkcost[i];
+                } else {
+                    costs[i][j] = INFINITY;
+                }
+            }
+        }
+        
+        // Initialize routing table
+        for (int i = 0; i < node_num; i++) {
+            for (int j = 0; j < node_num; j++) {
+                routes[i] = -1;
+            }
+            if (lkcost[i] != INFINITY) {
+                routes[i] = i;
+            }
+        }
+        
+        // send to directly-connected neighbours the costs of its shortest paths to all other network nodes
+        
+        // Set up the mincost array
+        int [] mincost = new int[lkcost.length];
+        for (int i = 0; i < mincost.length; i++) {
+            mincost[i] = costs[i][i];
+        }
+        
+        for (int i = 0; i < lkcost.length; i++) {
+            if (isNeighbour(i)) {
+                Packet distVector = new Packet(this.nodename, i, mincost);
+                NetworkSimulator.tolayer2(distVector);
+            }
+        }    
+        
+    }
+    
+    
+    // Checks whether the costs array has changed
+    boolean isChanged(int[][] previous, int[][] current) {
+        for (int i = 0; i < previous.length; i++) {
+            for (int j = 0; j < previous[0].length; j++) {
+                if (previous[i][j] != current[i][j]) {
+                    return true;
+                }    
+            }
+        }
+        return false;
+    }
+    
+    // Checks whether this node is neighbours with node id
+    boolean isNeighbour(int id) {
+        return id != this.nodename && lkcost[id] != INFINITY;
+    }
+    
+    void rtupdate(Packet rcvdpkt) {
+        int sender = rcvdpkt.sourceid;
+        int[] mincost = rcvdpkt.mincost;
+        boolean changed = false;
+        
+        int [][]prevcosts = new int[costs.length][costs[0].length];
+        for (int i = 0; i < prevcosts.length; i++) {
+            for (int j = 0; j < prevcosts[0].length; j++) {
+                prevcosts[i][j] = costs[i][j];
+            }
+        }
+        
+        // update the costs table
+        for (int dest = 0; dest < mincost.length; dest++) {        
+            if (mincost[dest] == INFINITY) {
+                costs[dest][sender] = INFINITY;
+            } else {
+                costs[dest][sender] = lkcost[sender] + mincost[dest];
+            }
+        }
+        
+        // calculate new mincost and update routing table accordingly
+        int[] newmin = new int[lkcost.length];
+        for (int dest = 0; dest < newmin.length; dest++) {
+            int min_temp = INFINITY;
+            int index = -1;
+            for (int i = 0; i < costs[dest].length; i++) {
+                if (costs[dest][i] < min_temp) {
+                    min_temp = costs[dest][i];
+                    index = i;
+                }
+            }
+            newmin[dest] = min_temp;
+            routes[dest] = index;
+        }
+        
+        changed = isChanged(prevcosts, costs);
+        
+        if (changed) {
+            System.out.println("Distance table is updated");
+            printdt();
+            printnode();
+            // send to directly-connected neighbours the costs of its shortest paths to all other network nodes
+            for (int i = 0; i < lkcost.length; i++) {
+                if (isNeighbour(i)) {
+                    
+                    int []prmincost = new int[newmin.length];
+                    for (int j = 0; j < prmincost.length; j++) {
+                        prmincost[j] = newmin[j];
+                    }
+                    
+                    
+                    // update mincost according to split horizon with poison reverse
+                    for (int dest = 0; dest < prmincost.length; dest++) {
+                        if (routes[dest] == i) {
+                            prmincost[dest] = INFINITY;
+                        }
+                    }
+                    Packet distVector = new Packet(this.nodename, i, prmincost);
+                    NetworkSimulator.tolayer2(distVector);
+                }
+            }
+        } else {
+            System.out.println("Distance table is not updated");
+            printdt();
+            printnode();
+        }
+    }
+    
+    /* called when cost from the node to linkid changes from current value to newcost*/
+    void linkhandler(int linkid, int newcost) {
+        lkcost[linkid] = newcost;
+        
+        // Simulate link failure by changing the appropriate column in the distance table to be infinity
+        for (int dest = 0; dest < node_num; dest++) {
+            this.costs[dest][linkid] = INFINITY;
+        }
+        
+        // calculate new mincost
+        int[] mincost = new int[lkcost.length];
+        for (int dest = 0; dest < mincost.length; dest++) {
+            int min_temp = INFINITY;
+            int index = -1;
+            for (int i = 0; i < costs[dest].length; i++) {
+                if (costs[dest][i] < min_temp) {
+                    min_temp = costs[dest][i];
+                    index = i;
+                }
+            }
+            mincost[dest] = min_temp;
+            routes[dest] = index;
+        }
+        
+        // send to directly-connected neighbours the costs of its shortest paths to all other network nodes
+        for (int i = 0; i < lkcost.length; i++) {
+            if (isNeighbour(i)) {
+                
+                int []prmincost = new int[mincost.length];
+                for (int j = 0; j < prmincost.length; j++) {
+                    prmincost[j] = mincost[j];
+                }
+                
+                // update mincost according to split horizon with poison reverse
+                for (int dest = 0; dest < prmincost.length; dest++) {
+                    if (routes[dest] == i) {
+                        prmincost[dest] = INFINITY;
+                    }
+                }
+                
+                Packet distVector = new Packet(this.nodename, i, prmincost);
+                NetworkSimulator.tolayer2(distVector);
+            }
+        }
+    }
+    
+    // Prints the current routing table (i.e. the next hop that this node should take given a destination
+    void printnode() {
+        System.out.println("Node "+ this.nodename +" Routing Situation:");
+        System.out.print("1-->" + routes[0]+", ");
+        System.out.print("2-->" + routes[1]+", ");
+        System.out.print("3-->" + routes[2]+", ");
+        System.out.print("4-->" + routes[3]);
+        System.out.println("");
+        System.out.println("==================================");
+    }
+    
+    /* Prints the current costs to reaching other nodes in the network */
+    void printdt() {
+        switch(nodename) {
+            case 0:
+                System.out.printf("                via     \n");
+                System.out.printf("   D0 |    1     2    3 \n");
+                System.out.printf("  ----|-----------------\n");
+                System.out.printf("     1|  %3d   %3d   %3d\n",costs[1][1], costs[1][2],costs[1][3]);
+                System.out.printf("dest 2|  %3d   %3d   %3d\n",costs[2][1], costs[2][2],costs[2][3]);
+                System.out.printf("     3|  %3d   %3d   %3d\n",costs[3][1], costs[3][2],costs[3][3]);
+                break;
+            case 1:
+                System.out.printf("                via     \n");
+                System.out.printf("   D1 |    0     2 \n");
+                System.out.printf("  ----|-----------------\n");
+                System.out.printf("     0|  %3d   %3d \n",costs[0][0], costs[0][2]);
+                System.out.printf("dest 2|  %3d   %3d \n",costs[2][0], costs[2][2]);
+                System.out.printf("     3|  %3d   %3d \n",costs[3][0], costs[3][2]);
+                break;
+                
+            case 2:
+                System.out.printf("                via     \n");
+                System.out.printf("   D2 |    0     1    3 \n");
+                System.out.printf("  ----|-----------------\n");
+                System.out.printf("     0|  %3d   %3d   %3d\n",costs[0][0], costs[0][1],costs[0][3]);
+                System.out.printf("dest 1|  %3d   %3d   %3d\n",costs[1][0], costs[1][1],costs[1][3]);
+                System.out.printf("     3|  %3d   %3d   %3d\n",costs[3][0], costs[3][1],costs[3][3]);
+                break;
+            case 3:
+                System.out.printf("                via     \n");
+                System.out.printf("   D3 |    0     2 \n");
+                System.out.printf("  ----|-----------------\n");
+                System.out.printf("     0|  %3d   %3d\n",costs[0][0],costs[0][2]);
+                System.out.printf("dest 1|  %3d   %3d\n",costs[1][0],costs[1][2]);
+                System.out.printf("     2|  %3d   %3d\n",costs[2][0],costs[2][2]);
+                break;
+        }
+    }
+}
